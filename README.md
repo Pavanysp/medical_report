@@ -148,7 +148,10 @@ Platelets 200000 /uL (Normal)
 
 * Image reports can be screenshots or scanned PDFs converted to images.
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> dc89a1cc56f09cbc01ff27e15e92e6717336ad0d
 
 ## Folder Structure
 

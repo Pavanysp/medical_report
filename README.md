@@ -148,11 +148,6 @@ Platelets 200000 /uL (Normal)
 
 * Image reports can be screenshots or scanned PDFs converted to images.
 
-## Demo Video
-
-* Record server running and sending requests (Postman/curl)
-* Show JSON output
-* Optional: Upload multiple reports
 
 ## Folder Structure
 
@@ -165,9 +160,4 @@ ai-medical-report-simplifier/
 ├── README.md
 ```
 
-## Notes
 
-* Gemini API key must be valid
-* OCR optional
-* Guardrail prevents hallucinated tests
-* Works locally or via ngrok

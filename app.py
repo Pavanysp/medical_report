@@ -1,15 +1,10 @@
-# app.py
 from flask import Flask, request, render_template, jsonify, send_from_directory
 import os
 import re
 import json
 import tempfile
-import traceback
-
-# Gemini client
 import google.generativeai as genai
 
-# Optional OCR
 try:
     from PIL import Image
     import pytesseract
@@ -20,24 +15,15 @@ except Exception:
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'sample_reports'
 
-# ------------------------------
-# GEMINI API KEY (directly here)
-# ------------------------------
 GEMINI_API_KEY = "AIzaSyBS0st-Ripk7WnpZNSAmQHvv5e5e2RDuYA"
 genai.configure(api_key=GEMINI_API_KEY)
 
-# ------------------------------
-# Default reference ranges
-# ------------------------------
 DEFAULT_REF_RANGES = {
     "Hemoglobin": {"unit": "g/dL", "low": 12.0, "high": 15.0},
     "WBC": {"unit": "/uL", "low": 4000, "high": 11000},
     "Platelets": {"unit": "/uL", "low": 150000, "high": 450000},
 }
 
-# ------------------------------
-# OCR utility
-# ------------------------------
 def ocr_from_image_file(file_stream):
     if not TESSERACT_AVAILABLE:
         raise RuntimeError("Install pillow + pytesseract + Tesseract engine for OCR")
@@ -46,7 +32,10 @@ def ocr_from_image_file(file_stream):
         tmp_path = tmp.name
     try:
         img = Image.open(tmp_path)
-        text = pytesseract.image_to_string(img)
+        img = img.convert("L")
+        img = img.point(lambda x: 0 if x < 140 else 255)
+        img = img.resize((img.width*2, img.height*2), Image.LANCZOS)
+        text = pytesseract.image_to_string(img, config="--psm 6")
         return text
     finally:
         try:
@@ -54,9 +43,6 @@ def ocr_from_image_file(file_stream):
         except Exception:
             pass
 
-# ------------------------------
-# Local extraction fallback
-# ------------------------------
 def extract_tests_local(text):
     text = text.replace("Hemglobin", "Hemoglobin").replace("Hbg", "Hemoglobin").replace("Hgh", "High")
     lines = []
@@ -67,9 +53,6 @@ def extract_tests_local(text):
     confidence = min(0.95, 0.5 + len(lines)/10)
     return {"tests_raw": lines, "confidence": round(confidence,2)}
 
-# ------------------------------
-# Normalize tests
-# ------------------------------
 def normalize_tests(tests_raw):
     normalized = []
     for test in tests_raw:
@@ -99,9 +82,6 @@ def normalize_tests(tests_raw):
     normalization_confidence = round(0.7 + len(normalized)/10, 2)
     return {"tests": normalized, "normalization_confidence": normalization_confidence}
 
-# ------------------------------
-# Call Gemini for summary + explanations
-# ------------------------------
 def generate_summary_gemini(normalized_tests, temperature=0.7):
     tests_text = "\n".join([f"{t['name']} ({t['value']} {t['unit']}): {t['status']}" for t in normalized_tests])
     prompt = f"""
@@ -131,9 +111,6 @@ def generate_summary_gemini(normalized_tests, temperature=0.7):
         print("Gemini error:", e)
         return {"summary": "Error generating summary", "explanations": []}
 
-# ------------------------------
-# Guardrail: check hallucinations
-# ------------------------------
 def validate_no_hallucination(parsed_json, tests_raw):
     raw_join = " ".join(tests_raw).lower()
     normalized = parsed_json.get("tests", [])
@@ -143,9 +120,6 @@ def validate_no_hallucination(parsed_json, tests_raw):
             return False, f"hallucinated test '{t.get('name')}' not present in input"
     return True, ""
 
-# ------------------------------
-# Flask routes
-# ------------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
     final_output = {}
@@ -157,10 +131,10 @@ def index():
             extracted_text = ""
             try:
                 if uploaded_file_name.endswith((".png",".jpg",".jpeg",".tiff",".bmp")):
-                    uploaded_file.stream.seek(0)
+                    file.stream.seek(0)
                     extracted_text = ocr_from_image_file(file.stream)
                 else:
-                    uploaded_file.stream.seek(0)
+                    file.stream.seek(0)
                     extracted_text = file.stream.read().decode("utf-8", errors="ignore")
             except Exception as e:
                 extracted_text = file.stream.read().decode("utf-8", errors="ignore")
@@ -169,13 +143,9 @@ def index():
             if not extracted_text or not re.search(r'\d', extracted_text):
                 final_output = {"status": "unprocessed", "reason": "No valid tests found"}
             else:
-                # Step 1: extract locally
                 extracted = extract_tests_local(extracted_text)
-                # Step 2: normalize
                 normalized = normalize_tests(extracted["tests_raw"])
-                # Step 3: generate summary
                 summary = generate_summary_gemini(normalized["tests"])
-                # Step 4: combine output
                 final_output = {
                     "tests_raw": extracted["tests_raw"],
                     "confidence": extracted["confidence"],
@@ -185,7 +155,6 @@ def index():
                     "explanations": summary.get("explanations", []),
                     "status": "ok"
                 }
-                # guardrail
                 ok, reason = validate_no_hallucination(final_output, extracted["tests_raw"])
                 if not ok:
                     final_output = {"status": "unprocessed", "reason": reason}
